@@ -1,0 +1,115 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description" : "AWS CloudFormation Template for Aurora with PostgreSQL",
+
+  "Parameters": {
+
+    "DBMasterUsername": {
+      "NoEcho": "true",
+      "Description": "Username for the database admin.",
+      "Default": "operaciones",
+      "Type": "String",
+      "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+      "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+    },
+    "DBMasterPassword": {
+      "NoEcho": "true",
+      "Description": "Password for the database admin.",
+      "Type": "String",
+      "AllowedPattern" : "[a-zA-Z0-9]+",
+      "ConstraintDescription" : "must contain only alphanumeric characters."
+    },
+    "Subnets" : {
+      "Type" : "List<AWS::EC2::Subnet::Id>",
+      "Description" : "The ID of subnets in your Virtual Private Cloud (VPC)",
+      "ConstraintDescription" : "must be a couple of existing private subnets associated with at least two different availability zones. They should be residing in the same VPC."
+    },
+    "DatabaseInstanceType":{
+      "Description": "Instance type where the db will live",
+      "Type": "String",
+      "AllowedValues": ["db.r4.large", "db.r4.xlarge", "db.r4.2xlarge", "db.r4.4xlarge", "db.r4.8xlarge", "db.r4.16xlarge"],
+      "Default": "db.r4.large"
+    },
+    "DatabaseBackupRetentionPeriod": {
+      "Type": "String",
+      "Default": "35",
+      "Description": "The database backup retention period in days."
+    },
+    "SecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup::Id",
+      "Description": "Security groups to apply to the RDS Cluster."
+    },
+    "ClusterParameterGroupName": {
+      "Type": "String",
+      "Description": "Name of the Cluster Parameter Group",
+      "Default": "default.aurora-postgresql9.6"
+    },
+    "DBName": {
+      "Description": "Name of the database to be created.",
+      "Type": "String",
+    }
+
+  },
+
+  "Resources": {
+
+  "DBSubnetGroup":{
+     "Type" : "AWS::RDS::DBSubnetGroup",
+     "Properties" : {
+        "DBSubnetGroupDescription" : "SubnetGroup for the AuroraDB Cluster",
+        "SubnetIds" : {"Ref": "Subnets"}
+      }
+    },
+
+    "AuroraDBCluster" : {
+      "Type" : "AWS::RDS::DBCluster",
+      "Properties" : {
+        "MasterUsername" : { "Ref" : "DBMasterUsername" },
+        "MasterUserPassword" : { "Ref" : "DBMasterPassword" },
+        "Engine" : "aurora-postgresql",
+        "DatabaseName": {"Ref": "DBName"},
+        "Port": "5432",
+        "DBSubnetGroupName" : { "Ref" : "DBSubnetGroup" },
+        "DBClusterParameterGroupName" : { "Ref": "ClusterParameterGroupName" },
+        "BackupRetentionPeriod": { "Ref": "DatabaseBackupRetentionPeriod" },
+        "PreferredBackupWindow": "02:00-03:00",
+        "PreferredMaintenanceWindow": "mon:03:00-mon:04:00",
+        "DBSubnetGroupName": { "Ref": "DBSubnetGroup" },
+        "VpcSecurityGroupIds": [{ "Ref": "SecurityGroup" }]
+      }
+    },
+
+    "AuroraDBPrimaryInstance" : {
+      "Type" : "AWS::RDS::DBInstance",
+      "Properties" : {
+        "DBSubnetGroupName" : { "Ref" : "DBSubnetGroup" },
+        "Engine" : "aurora-postgresql",
+        "DBClusterIdentifier" : { "Ref" : "AuroraDBCluster" },
+        "PubliclyAccessible" : "false",
+        "DBInstanceClass" : {"Ref": "DatabaseInstanceType"}
+      }
+    },
+
+    "AuroraDBReplicaInstance" : {
+      "Type" : "AWS::RDS::DBInstance",
+      "Properties" : {
+        "DBSubnetGroupName" : { "Ref" : "DBSubnetGroup" },
+        "Engine" : "aurora-postgresql",
+        "DBClusterIdentifier" : { "Ref" : "AuroraDBCluster" },
+        "PubliclyAccessible" : "false",
+        "DBInstanceClass" : {"Ref": "DatabaseInstanceType"}
+      }
+    }
+
+  },
+
+  "Outputs": {
+    "ClusterEndPointAddress": {
+      "Description": "Endpoint of the created DB.",
+      "Value": { "Fn::GetAtt" : ["AuroraDBCluster", "Endpoint.Address"] },
+      "Export" : {"Name": { "Fn::Sub": "${AWS::StackName}-DBDNS" }}
+    }
+  }
+
+}
