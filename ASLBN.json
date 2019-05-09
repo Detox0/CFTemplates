@@ -56,10 +56,6 @@
      "Type": "String",
      "ConstraintDescription": "Must be a valid password."
    },
-   "EC2InstanceSecurityGroup":{
-     "Type": "AWS::EC2::SecurityGroup::Id",
-     "Description": "Security Group of the EC2Instance"
-   },
    "Subnets": {
      "Description": "Id of a subnet that will shelter the EC2 Instance",
      "Type": "List<AWS::EC2::Subnet::Id>",
@@ -69,7 +65,7 @@
      "Description": "Name of the database created in the AuroraStack.",
      "Type": "String",
    },
-   "VpcId" : {
+   "VpcId": {
      "Type" : "AWS::EC2::VPC::Id",
      "Description" : "VpcId of your existing Virtual Private Cloud (VPC)",
      "ConstraintDescription" : "must be the VPC Id of an existing Virtual Private Cloud."
@@ -217,8 +213,7 @@
     "NotificationTopic": {
       "Type": "AWS::SNS::Topic",
       "Properties": {
-        "Subscription": [ { "Endpoint": "operaciones@thedogcompany.cl", "Protocol": "email" },
-                          { "Endpoint": "luis@thedogcompany.cl", "Protocol": "email" } ]
+        "Subscription": [ { "Endpoint": "operaciones@thedogcompany.cl", "Protocol": "email" } ]
       }
     },
 
@@ -238,12 +233,7 @@
                                   "autoscaling:EC2_INSTANCE_TERMINATE_ERROR"]
         }
       },
-      "CreationPolicy" : {
-        "ResourceSignal" : {
-          "Timeout" : "PT15M",
-          "Count"   : "1"
-        }
-      },
+
       "UpdatePolicy": {
         "AutoScalingRollingUpdate": {
           "MinInstancesInService": "1",
@@ -260,7 +250,7 @@
         "Comment": "Data that will be added to the EC2 creation",
         "AWS::CloudFormation::Init": {
           "configSets": {
-            "InstallAndRun": ["Install_cfn", "Install_packages", "SetUp_app"]
+            "InstallAndRun": ["Install_cfn", "Install_packages", "SetUp_env", "Deploy_app"]
           },
           "Install_cfn": {
             "files": {
@@ -305,39 +295,55 @@
               }
             }
           },
-          "SetUp_app":{
+          "SetUp_env":{
             "commands":{
+              "00_userTesting":{
+                "command": {"Fn::Join": ["", ["su - ec2-user && echo $USER > /home/ec2-user/user.txt"]]}
+              },
               "01_cloneProject":{
                 "command": {"Fn::Join": ["", ["git clone https://", {"Ref": "CVUserName"},":",{"Ref": "CVPassWord"},{"Ref": "RepositoryExtension"}, " /home/ec2-user/src\n"]]}
               },
               "02_createNginxFile":{
-                "command": {"Fn::Join": ["", ["echo -e \"upstream django {\n server 127.0.0.1:8000;\n }\n\nserver {\n listen 80;\n server_name ", { "Fn::GetAtt" : [ "ApplicationLoadBalancer", "DNSName" ] } ,";\n charset  utf-8;\n client_max_body_size 75M;\n location /static  {\n  alias /home/ec2-user/src/static;\n }\n location /{\n
-                  proxy_pass_header Server;\n  proxy_set_header Host $http_host;\n  proxy_redirect off;\n  proxy_set_header X-Real-IP $remote_addr;\n  proxy_set_header X-Scheme $scheme;\n  proxy_pass http://django/;\n }\n}\" > tmp/mysite_nginx.conf\n"]]}
+                "command": {"Fn::Join": ["", ["echo -e \"upstream django {\n server 127.0.0.1:8000;\n }\n\nserver {\n listen 80;\n server_name ", { "Fn::GetAtt" : [ "ApplicationLoadBalancer", "DNSName" ] } ,";\n charset  utf-8;\n client_max_body_size 75M;\n location /static  {\n  alias /home/ec2-user/src/staticfiles ;\n }\n location /{\n
+                  proxy_pass_header Server;\n  proxy_set_header Host \\$http_host;\n  proxy_redirect off;\n  proxy_set_header X-Real-IP  \\$remote_addr;\n  proxy_set_header X-Scheme \\$scheme;\n  proxy_pass http://django/;\n }\n}\" > tmp/mysite_nginx.conf\n"]]}
               },
-              "03_appendDB":{
+              "03_setupNginxConf":{
+                "command": {"Fn::Join": ["", ["sed -i 's/http {/http {server_names_hash_bucket_size  128;/1' /etc/nginx/nginx.conf"]]}
+              },
+              "04_appendDB":{
                 "command": {"Fn::Join": ["", ["echo -e \"DATABASES = {\n 'default': {\n  'ENGINE': 'django.db.backends.postgresql',\n  'NAME': '",{"Ref": "DBName"},"' ,\n  'USER': '",{"Ref": "DBAdminUser"},"',\n  'PASSWORD': '",{"Ref": "DBAdminPassword"},"',\n  'HOST': '",{"Ref": "AuroraDBStackDNS"},
                   "',\n  'PORT': ''\n }\n}\nDATABASES['default'].update(db_from_env) \" >> /home/ec2-user/src/",{"Ref": "MainFolderName"},"/settings.py"]]}
               },
-              "04_moveFolder":{
+              "05_moveFolder":{
                 "command": {"Fn::Join": ["", ["cp /tmp/mysite_nginx.conf /home/ec2-user/src"]]}
               },
-              "05_startNginx":{
+              "06_grantNginxPermissions": {
+                "command": {"Fn::Join": ["", ["chmod 755 -R /home/ec2-user"]]}
+              },
+              "07_startNginx":{
                 "command": {"Fn::Join": ["", ["/etc/init.d/nginx start"]]}
               },
-              "06_symLink":{
+              "08_symLink":{
                 "command": {"Fn::Join": ["", ["ln -s /home/ec2-user/src/mysite_nginx.conf /etc/nginx/conf.d/"]]}
               },
-              "07_installPipenv":{
+              "09_installPipenv":{
                 "command": {"Fn::Join": ["", ["curl https://raw.githubusercontent.com/kennethreitz/pipenv/master/get-pipenv.py | python"]]}
-              },
-              "08_installDependencies": {
+              }
+            }
+          },
+          "Deploy_app":{
+            "commands":{
+              "01_createPipenv": {
                 "command": {"Fn::Join": ["", ["cd /home/ec2-user/src && pipenv --three && pipenv install"]]}
               },
-              "09_startApp":{
-                "command": {"Fn::Join": ["", ["cd /home/ec2-user/src && pipenv run python manage.py collectstatic && pipenv run python manage.py migrate && pipenv run uwsgi --http :8000 --module ",{ "Ref": "MainFolderName" },".wsgi"]]}
+              "02_collectStatics": {
+                "command": {"Fn::Join": ["", ["cd /home/ec2-user/src && pipenv run python manage.py collectstatic"]]}
               },
-              "10_finalTest": {
-                "command": {"Fn::Join": ["", ["echo \"GoodBye World!\" > /home/ec2-user/end.txt"]]}
+              "03_migrateDB": {
+                "command": {"Fn::Join": ["", ["cd /home/ec2-user/src && pipenv run python manage.py migrate"]]}
+              },
+              "04_UwsgiDeploy":{
+                "command": {"Fn::Join": ["", ["cd /home/ec2-user/src && uwsgi --http :8000 --module ",{"Ref": "MainFolderName"},".wsgi"]]}
               }
             }
           }
@@ -345,7 +351,7 @@
       },
       "Properties" : {
         "InstanceType" : { "Ref" : "InstanceType" },
-        "SecurityGroupIds" : [{ "Ref": "EC2InstanceSecurityGroup" }],
+        "SecurityGroups" : [{ "Ref": "AutoScalingSecurityGroup" }],
         "KeyName" : { "Ref" : "KeyName" },
         "UserData": {"Fn::Base64": {"Fn::Join": ["", [
           "#!/bin/bash -xe\n",
@@ -432,7 +438,8 @@
     "ApplicationLoadBalancer" : {
       "Type" : "AWS::ElasticLoadBalancingV2::LoadBalancer",
       "Properties" : {
-        "Subnets" : { "Ref" : "Subnets"}
+        "Subnets" : { "Ref" : "Subnets"},
+        "SecurityGroups": [{"Ref": "LoadBalancerSecurityGroup"}]
       }
     },
 
@@ -459,6 +466,40 @@
         "Protocol" : "HTTP",
         "UnhealthyThresholdCount" : 5,
         "VpcId" : {"Ref" : "VpcId"}
+      }
+    },
+
+    "AutoScalingSecurityGroup" : {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Security group for the auto scaling machines that allows requests to the port 80 and port 22 for SSH",
+        "SecurityGroupIngress": [{
+            "IpProtocol" : "tcp",
+            "FromPort" : 80,
+            "ToPort" : 80,
+            "CidrIp" : "0.0.0.0/0"
+          },
+          {
+            "IpProtocol" : "tcp",
+            "FromPort" : 22,
+            "ToPort" : 22,
+            "CidrIp" : "0.0.0.0/0"
+          }],
+        "VpcId": { "Ref": "VpcId" }
+      }
+    },
+
+    "LoadBalancerSecurityGroup" : {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Security group for the load balancer machines that allows requests to the port 80",
+        "SecurityGroupIngress": [{
+            "IpProtocol" : "tcp",
+            "FromPort" : 80,
+            "ToPort" : 80,
+            "CidrIp" : "0.0.0.0/0"
+          }],
+        "VpcId": { "Ref": "VpcId" }
       }
     }
   },

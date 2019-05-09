@@ -36,9 +36,9 @@
       "Default": "35",
       "Description": "The database backup retention period in days."
     },
-    "SecurityGroup": {
-      "Type": "AWS::EC2::SecurityGroup::Id",
-      "Description": "Security groups to apply to the RDS Cluster."
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Description": "VPC in wich the cluster will be deployed."
     },
     "ClusterParameterGroupName": {
       "Type": "String",
@@ -76,7 +76,7 @@
         "PreferredBackupWindow": "02:00-03:00",
         "PreferredMaintenanceWindow": "mon:03:00-mon:04:00",
         "DBSubnetGroupName": { "Ref": "DBSubnetGroup" },
-        "VpcSecurityGroupIds": [{ "Ref": "SecurityGroup" }]
+        "VpcSecurityGroupIds": [{ "Ref": "AuroraClusterSecurityGroup" }]
       }
     },
 
@@ -99,6 +99,26 @@
         "DBClusterIdentifier" : { "Ref" : "AuroraDBCluster" },
         "PubliclyAccessible" : "false",
         "DBInstanceClass" : {"Ref": "DatabaseInstanceType"}
+      }
+    },
+
+    "AuroraClusterSecurityGroup":{
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Standard Security group for the aurora db custer, enables requests to port 5432 and SSH",
+        "SecurityGroupIngress": [{
+            "IpProtocol" : "tcp",
+            "FromPort" : 5432,
+            "ToPort" : 5432,
+            "CidrIp" : "0.0.0.0/0"
+          },
+          {
+            "IpProtocol" : "tcp",
+            "FromPort" : 22,
+            "ToPort" : 22,
+            "CidrIp" : "0.0.0.0/0"
+          }],
+        "VpcId": { "Ref": "VpcId" }
       }
     }
 
