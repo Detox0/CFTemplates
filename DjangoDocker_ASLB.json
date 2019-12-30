@@ -39,25 +39,36 @@
      "Type": "String",
      "ConstraintDescription": "The creation will fail if the name is incorrect"
    },
+   "AuroraDBStackDNS":{
+     "Description": "DNS of the Stack where AuroraDB lives.",
+     "Type": "String",
+     "ConstraintDescription": "Must be a valid DNS name."
+   },
+   "DBAdminUser":{
+     "NoEcho": "true",
+     "Description": "Database admin username.",
+     "Type": "String",
+     "ConstraintDescription": "Must be a valid username"
+   },
+   "DBAdminPassword":{
+     "NoEcho": "true",
+     "Description": "Database admin password.",
+     "Type": "String",
+     "ConstraintDescription": "Must be a valid password."
+   },
    "Subnets": {
      "Description": "Id of a subnet that will shelter the EC2 Instance",
      "Type": "List<AWS::EC2::Subnet::Id>",
-     "ConstraintDescription": "Must be in the same VPC that the AuroraDB instance (IF you have an Aurora Instance)."
+     "ConstraintDescription": "Must be in the same VPC that the AuroraDB instance."
+   },
+   "DBName": {
+     "Description": "Name of the database created in the AuroraStack.",
+     "Type": "String",
    },
    "VpcId": {
      "Type" : "AWS::EC2::VPC::Id",
      "Description" : "VpcId of your existing Virtual Private Cloud (VPC)",
      "ConstraintDescription" : "must be the VPC Id of an existing Virtual Private Cloud."
-   },
-   "ZabbixMetaData": {
-     "Type": "String",
-     "Description" : "Server identifier so that Zabbix can monitor the AutoScaling instances.",
-     "ConstraintDescription" : "Must create an autoregistration action in Zabbix with the instruction 'Host metadata contains (this string)'."
-   },
-   "DomainName":{
-     "Type": "String",
-     "Description" : "Domain Name where the application will live.",
-     "ConstraintDescription" : "Must be a valid Domain Name"
    }
   },
 
@@ -321,7 +332,7 @@
         "Comment": "Data that will be added to the EC2 creation",
         "AWS::CloudFormation::Init": {
           "configSets": {
-            "InstallAndRun": ["Install_cfn", "Install_packages", "SetUp_env", "Zabbix_Installation", "Deploy_app"]
+            "InstallAndRun": ["Install_cfn", "Install_packages", "SetUp_env", "Deploy_app"]
           },
           "Install_cfn": {
             "files": {
@@ -363,8 +374,6 @@
                 "git": [],
                 "nginx": [],
                 "gcc": [],
-                "postgresql96": [],
-                "postgresql96-server": [],
                 "awslogs": []
               }
             },
@@ -426,6 +435,11 @@
                 "group": "root"
               }
             },
+            "commands" : {
+              "01_create_state_directory" : {
+                "command" : "mkdir -p /var/awslogs/state"
+              }
+            },
             "services" : {
               "sysvinit" : {
                 "awslogs"    : { "enabled" : "true", "ensureRunning" : "true",
@@ -435,14 +449,14 @@
           },
           "SetUp_env":{
             "files":{
-              "/tmp/mysite_nginx.conf": {
+              "tmp/mysite_nginx.conf": {
                 "content": { "Fn::Join": [ "", [
                   "upstream django {\n",
                   " server 127.0.0.1:8000;\n",
                   "}\n\n",
                   "server {\n",
                   " listen 80;\n",
-                  " server_name ", { "Ref": "DomainName" } ,";\n",
+                  " server_name ", { "Fn::GetAtt" : [ "ApplicationLoadBalancer", "DNSName" ] } ,";\n",
                   " charset  utf-8;\n",
                   " client_max_body_size 75M;\n",
                   " location /static  {\n",
@@ -450,10 +464,10 @@
                   " }\n",
                   " location /{\n",
                   "  proxy_pass_header Server;\n",
-                  "  proxy_set_header Host $http_host;\n",
+                  "  proxy_set_header Host \\$http_host;\n",
                   "  proxy_redirect off;\n",
-                  "  proxy_set_header X-Real-IP  $remote_addr;\n",
-                  "  proxy_set_header X-Scheme $scheme;",
+                  "  proxy_set_header X-Real-IP  \\$remote_addr;\n",
+                  "  proxy_set_header X-Scheme \\$scheme;",
                   "  proxy_pass http://django/;\n",
                   " }\n",
                   "}"
@@ -468,45 +482,35 @@
               "01_cloneProject":{
                 "command": {"Fn::Join": ["", ["git clone https://", {"Ref": "CVUserName"},":",{"Ref": "CVPassWord"},{"Ref": "RepositoryExtension"}, " /var/www/src"]]}
               },
-              "02_moveFolder":{
+              "03_setupNginxConf":{
+                "command": {"Fn::Join": ["", ["sed -i 's/http {/http {server_names_hash_bucket_size  128;/1' /etc/nginx/nginx.conf"]]}
+              },
+              "04_appendDB":{
+                "command": {"Fn::Join": ["", ["echo -e \"DATABASES = {\n 'default': {\n  'ENGINE': 'django.db.backends.postgresql',\n  'NAME': '",{"Ref": "DBName"},"' ,\n  'USER': '",{"Ref": "DBAdminUser"},"',\n  'PASSWORD': '",{"Ref": "DBAdminPassword"},"',\n  'HOST': '",{"Ref": "AuroraDBStackDNS"},
+                  "',\n  'PORT': ''\n }\n}\nDATABASES['default'].update(db_from_env) \" >> /var/www/src/",{"Ref": "MainFolderName"},"/settings.py"]]}
+              },
+              "05_moveFolder":{
                 "command": {"Fn::Join": ["", ["cp /tmp/mysite_nginx.conf /var/www/src"]]}
               },
-              "03_startNginx":{
+              "07_startNginx":{
                 "command": {"Fn::Join": ["", ["/etc/init.d/nginx start"]]}
               },
-              "04_symLink":{
+              "08_symLink":{
                 "command": {"Fn::Join": ["", ["ln -s /var/www/src/mysite_nginx.conf /etc/nginx/conf.d/"]]}
               },
-              "05_installPipenv":{
+              "09_installPipenv":{
                 "command": {"Fn::Join": ["", ["curl https://raw.githubusercontent.com/kennethreitz/pipenv/master/get-pipenv.py | python"]]}
+              },
+              "10_preInstallDocker":{
+                "command": {"Fn::Join": ["", ["apt-get install     apt-transport-https     ca-certificates     curl     gnupg-agent     software-properties-common -y"]]}
+              },
+              "11_InstallDocker":{
+                "command": {"Fn::Join": ["", ["apt-get install     apt-transport-https     ca-certificates     curl     gnupg-agent     software-properties-common -y"]]}
               }
-            }
-          },
-          "Zabbix_Installation":{
-            "commands":{
-              "01_installZabbixAgent": {
-                "command": {"Fn::Join": ["", ["rpm -Uvh https://repo.zabbix.com/zabbix/4.4/rhel/6/x86_64/zabbix-agent-4.4.0-1.el6.x86_64.rpm"]]},
-              },
-              "02_addServerActive": {
-                "command": {"Fn::Join": ["", ["sed -i '139 s/ServerActive=127.0.0.1/ServerActive=zabbix.labs-tdc.com:10051/' /etc/zabbix/zabbix_agentd.conf "]]},
-              },
-              "03_removeHostName": {
-                "command": {"Fn::Join": ["", ["sed -i '150 s/Hostname=Zabbix server/#Hostname=/' /etc/zabbix/zabbix_agentd.conf "]]},
-              },
-              "04_addMetaData": {
-                "command": {"Fn::Join": ["", ["sed -i '169 s/# HostMetadata=/HostMetadata= ", {"Ref": "ZabbixMetaData"} ,"/' /etc/zabbix/zabbix_agentd.conf "]]},
-              },
-              "05_addMetaData": {
-                "command": {"Fn::Join": ["", ["service zabbix-agent start"]]},
-              }
-
             }
           },
           "Deploy_app":{
             "commands":{
-              "00_changeOwner":{
-                "command": {"Fn::Join": ["", ["chown -R ec2-user /var/www/src "]]},
-              },
               "01_createPipenv": {
                 "command": {"Fn::Join": ["", ["su - ec2-user -c \"cd /var/www/src && pipenv --three && pipenv install\""]]},
               },
@@ -648,7 +652,12 @@
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
         "GroupDescription": "Security group for the auto scaling machines that allows requests to the port 80 and port 22 for SSH",
-        "SecurityGroupIngress": [
+        "SecurityGroupIngress": [{
+            "IpProtocol" : "tcp",
+            "FromPort" : 80,
+            "ToPort" : 80,
+            "CidrIp" : "0.0.0.0/0"
+          },
           {
             "IpProtocol" : "tcp",
             "FromPort" : 22,
@@ -668,14 +677,7 @@
             "FromPort" : 80,
             "ToPort" : 80,
             "CidrIp" : "0.0.0.0/0"
-          },
-          {
-            "IpProtocol" : "tcp",
-            "FromPort" : 443,
-            "ToPort" : 443,
-            "CidrIp" : "0.0.0.0/0"
-          }
-        ],
+          }],
         "VpcId": { "Ref": "VpcId" }
       }
     }

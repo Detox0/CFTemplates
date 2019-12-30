@@ -4,7 +4,6 @@
   "Description" : "AWS CloudFormation Sample Template EC2InstanceWithSecurityGroupSample: Create an Amazon EC2 instance running the Amazon Linux AMI. The AMI is chosen based on the region in which the stack is run. This example creates an EC2 security group for the instance to give you SSH access. **WARNING** This template creates an Amazon EC2 instance. You will be billed for the AWS resources used if you create a stack from this template.",
 
   "Parameters" : {
-
     "KeyName": {
       "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instance",
       "Type": "AWS::EC2::KeyPair::KeyName",
@@ -34,30 +33,30 @@
      "Type": "String",
      "ConstraintDescription": "Must be a valid repository URL"
    },
-   "MainFolderName": {
-     "Description": "Name of the folder containing the main folder of the app.",
-     "Type": "String",
-     "ConstraintDescription": "The creation will fail if the name is incorrect"
-   },
    "Subnets": {
      "Description": "Id of a subnet that will shelter the EC2 Instance",
      "Type": "List<AWS::EC2::Subnet::Id>",
-     "ConstraintDescription": "Must be in the same VPC that the AuroraDB instance (IF you have an Aurora Instance)."
+     "ConstraintDescription": "Must be in the same VPC that the AuroraDB instance."
    },
    "VpcId": {
      "Type" : "AWS::EC2::VPC::Id",
      "Description" : "VpcId of your existing Virtual Private Cloud (VPC)",
      "ConstraintDescription" : "must be the VPC Id of an existing Virtual Private Cloud."
    },
-   "ZabbixMetaData": {
-     "Type": "String",
-     "Description" : "Server identifier so that Zabbix can monitor the AutoScaling instances.",
-     "ConstraintDescription" : "Must create an autoregistration action in Zabbix with the instruction 'Host metadata contains (this string)'."
+   "BranchName": {
+      "Type": "String",
+      "Description": "Name of the non-master branch that will be cloned",
+      "ConstraintDescription" : "Must be a valid branch name."
    },
-   "DomainName":{
+   "WebSiteName": {
+      "Type": "String",
+      "Description": "Name of the website",
+      "ConstraintDescription" : "Remember to point from Domain Name to the generated DNS"
+   },
+   "DeploymentName": {
      "Type": "String",
-     "Description" : "Domain Name where the application will live.",
-     "ConstraintDescription" : "Must be a valid Domain Name"
+     "Description": "Name of the Environment",
+     "ConstraintDescription" : "Add : followed by the environment name (eg: :dev or :staging, in case of prod, leave blank)"
    }
   },
 
@@ -266,7 +265,6 @@
         } ]
       }
     },
-
     "LogRoleInstanceProfile": {
       "Type": "AWS::IAM::InstanceProfile",
       "Properties": {
@@ -274,21 +272,18 @@
         "Roles": [ { "Ref": "LogRole" } ]
       }
     },
-
     "CloudFormationLogs": {
       "Type": "AWS::Logs::LogGroup",
       "Properties": {
         "RetentionInDays": 7
       }
     },
-
     "NotificationTopic": {
       "Type": "AWS::SNS::Topic",
       "Properties": {
         "Subscription": [ { "Endpoint": "operaciones@thedogcompany.cl", "Protocol": "email" } ]
       }
     },
-
     "WebServerGroup" : {
       "Type" : "AWS::AutoScaling::AutoScalingGroup",
       "Properties" : {
@@ -305,6 +300,7 @@
                                   "autoscaling:EC2_INSTANCE_TERMINATE_ERROR"]
         }
       },
+
       "UpdatePolicy": {
         "AutoScalingRollingUpdate": {
           "MinInstancesInService": "1",
@@ -321,7 +317,7 @@
         "Comment": "Data that will be added to the EC2 creation",
         "AWS::CloudFormation::Init": {
           "configSets": {
-            "InstallAndRun": ["Install_cfn", "Install_packages", "SetUp_env", "Zabbix_Installation", "Deploy_app"]
+            "InstallAndRun": ["Install_cfn", "Install_packages_and_logs", "Deploy_app"]
           },
           "Install_cfn": {
             "files": {
@@ -354,18 +350,29 @@
                               "files" : ["/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf"]}
             }
           },
-          "Install_packages":{
-            "packages": {
+          "Install_packages_and_logs":{
+            "packages":{
               "yum": {
-                "python36": [],
-                "python36-devel": [],
-                "python36-tools": [],
                 "git": [],
                 "nginx": [],
-                "gcc": [],
-                "postgresql96": [],
-                "postgresql96-server": [],
                 "awslogs": []
+              }
+            },
+            "commands" : {
+              "00_add_Node_Repo": {
+                "command": {"Fn::Join": ["", ["curl -sL https://rpm.nodesource.com/setup_10.x | sudo bash -"]]}
+              },
+              "01_install_Node": {
+                "command" : {"Fn::Join": ["", ["yum install -y nodejs"]]}
+              },
+              "02_install_yarn": {
+                "command" : {"Fn::Join": ["", ["npm install yarn -g"]]}
+              },
+              "04_create_state_directory" : {
+                "command" : "mkdir -p /var/awslogs/state"
+              },
+              "05_StartNginx":{
+                "command": {"Fn::Join": ["", ["service nginx start"]]},
               }
             },
             "files":{
@@ -433,88 +440,31 @@
               }
             }
           },
-          "SetUp_env":{
-            "files":{
-              "/tmp/mysite_nginx.conf": {
+          "Deploy_app":{
+            "files": {
+              "/etc/nginx/conf.d/default.conf": {
                 "content": { "Fn::Join": [ "", [
-                  "upstream django {\n",
-                  " server 127.0.0.1:8000;\n",
-                  "}\n\n",
                   "server {\n",
                   " listen 80;\n",
-                  " server_name ", { "Ref": "DomainName" } ,";\n",
-                  " charset  utf-8;\n",
-                  " client_max_body_size 75M;\n",
-                  " location /static  {\n",
-                  "  alias /var/www/src/staticfiles ;\n",
-                  " }\n",
-                  " location /{\n",
-                  "  proxy_pass_header Server;\n",
-                  "  proxy_set_header Host $http_host;\n",
-                  "  proxy_redirect off;\n",
-                  "  proxy_set_header X-Real-IP  $remote_addr;\n",
-                  "  proxy_set_header X-Scheme $scheme;",
-                  "  proxy_pass http://django/;\n",
+                  " root /var/www/src/build;\n",
+                  " server_name ", { "Ref" : "WebSiteName" }, ";\n",
+                  " index index.html;\n",
+                  " location / {\n",
+                  "  try_files $uri /index.html =404;\n",
                   " }\n",
                   "}"
-                  ]]},
-                  "mode": "000755",
-                  "owner": "root",
-                  "group": "root"
+                ] ] },
               }
-
             },
             "commands":{
-              "01_cloneProject":{
-                "command": {"Fn::Join": ["", ["git clone https://", {"Ref": "CVUserName"},":",{"Ref": "CVPassWord"},{"Ref": "RepositoryExtension"}, " /var/www/src"]]}
+              "00_Clone_Project":{
+                "command": {"Fn::Join": ["", ["git clone --branch ", {"Ref": "BranchName"} ," https://", {"Ref": "CVUserName"},":",{"Ref": "CVPassWord"},{"Ref": "RepositoryExtension"}, " /var/www/src"]]}
               },
-              "02_moveFolder":{
-                "command": {"Fn::Join": ["", ["cp /tmp/mysite_nginx.conf /var/www/src"]]}
+              "01_Install_Dependencies": {
+                "command": {"Fn::Join": ["", ["cd /var/www/src && yarn install"]]},
               },
-              "03_startNginx":{
-                "command": {"Fn::Join": ["", ["/etc/init.d/nginx start"]]}
-              },
-              "04_symLink":{
-                "command": {"Fn::Join": ["", ["ln -s /var/www/src/mysite_nginx.conf /etc/nginx/conf.d/"]]}
-              },
-              "05_installPipenv":{
-                "command": {"Fn::Join": ["", ["curl https://raw.githubusercontent.com/kennethreitz/pipenv/master/get-pipenv.py | python"]]}
-              }
-            }
-          },
-          "Zabbix_Installation":{
-            "commands":{
-              "01_installZabbixAgent": {
-                "command": {"Fn::Join": ["", ["rpm -Uvh https://repo.zabbix.com/zabbix/4.4/rhel/6/x86_64/zabbix-agent-4.4.0-1.el6.x86_64.rpm"]]},
-              },
-              "02_addServerActive": {
-                "command": {"Fn::Join": ["", ["sed -i '139 s/ServerActive=127.0.0.1/ServerActive=zabbix.labs-tdc.com:10051/' /etc/zabbix/zabbix_agentd.conf "]]},
-              },
-              "03_removeHostName": {
-                "command": {"Fn::Join": ["", ["sed -i '150 s/Hostname=Zabbix server/#Hostname=/' /etc/zabbix/zabbix_agentd.conf "]]},
-              },
-              "04_addMetaData": {
-                "command": {"Fn::Join": ["", ["sed -i '169 s/# HostMetadata=/HostMetadata= ", {"Ref": "ZabbixMetaData"} ,"/' /etc/zabbix/zabbix_agentd.conf "]]},
-              },
-              "05_addMetaData": {
-                "command": {"Fn::Join": ["", ["service zabbix-agent start"]]},
-              }
-
-            }
-          },
-          "Deploy_app":{
-            "commands":{
-              "00_changeOwner":{
-                "command": {"Fn::Join": ["", ["chown -R ec2-user /var/www/src "]]},
-              },
-              "01_createPipenv": {
-                "command": {"Fn::Join": ["", ["su - ec2-user -c \"cd /var/www/src && pipenv --three && pipenv install\""]]},
-              },
-              "02_migrateDB": {
-                "command": {"Fn::Join": ["", ["su - ec2-user -c \"cd /var/www/src && pipenv run python manage.py migrate\""]]},
-              },
-              "03_UwsgiDeploy":{
-                "command": {"Fn::Join": ["", ["su - ec2-user -c \"cd /var/www/src && pipenv run uwsgi --http :8000 --module ",{"Ref": "MainFolderName"},".wsgi&\""]]},
+              "02_Run_React":{
+                "command": {"Fn::Join": ["", ["cd /var/www/src && yarn build",{"Ref": "DeploymentName"}]]},
               },
               "03_RestartNginx":{
                 "command": {"Fn::Join": ["", ["service nginx restart"]]},
@@ -648,11 +598,22 @@
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
         "GroupDescription": "Security group for the auto scaling machines that allows requests to the port 80 and port 22 for SSH",
-        "SecurityGroupIngress": [
+        "SecurityGroupIngress": [{
+            "IpProtocol" : "tcp",
+            "FromPort" : 80,
+            "ToPort" : 80,
+            "CidrIp" : "0.0.0.0/0"
+          },
           {
             "IpProtocol" : "tcp",
             "FromPort" : 22,
             "ToPort" : 22,
+            "CidrIp" : "0.0.0.0/0"
+          },
+          {
+            "IpProtocol" : "tcp",
+            "FromPort" : 443,
+            "ToPort" : 443,
             "CidrIp" : "0.0.0.0/0"
           }],
         "VpcId": { "Ref": "VpcId" }

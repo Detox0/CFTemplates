@@ -43,7 +43,7 @@
     "ClusterParameterGroupName": {
       "Type": "String",
       "Description": "Name of the Cluster Parameter Group",
-      "Default": "default.aurora-postgresql9.6"
+      "Default": "default.aurora-postgresql10"
     },
     "DBName": {
       "Description": "Name of the database to be created.",
@@ -127,8 +127,11 @@
   "Outputs": {
     "ClusterEndPointAddress": {
       "Description": "Endpoint of the created DB.",
-      "Value": { "Fn::GetAtt" : ["AuroraDBCluster", "Endpoint.Address"] },
-      "Export" : {"Name": { "Fn::Sub": "${AWS::StackName}-DBDNS" }}
+      "Value": { "Fn::GetAtt" : ["AuroraDBCluster", "Endpoint.Address"] }
+    },
+    "ReaderEndpointAddress": {
+      "Description": "Reader Endpoint of the created DB.",
+      "Value": { "Fn::GetAtt" : ["AuroraDBCluster", "ReadEndpoint.Address"] }
     }
   }
 

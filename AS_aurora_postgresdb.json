@@ -1,0 +1,43 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description" : "AWS CloudFormation Template for Aurora with PostgreSQL",
+
+  "Parameters": {
+
+    "AuroraStack": {
+      "Description": "Name of the Aurora Template created for this project",
+      "Type": "AWS::RDS::DBCluster::Id",
+      "ConstraintDescription": "You must create the Aurora stack first."
+    }
+
+  },
+
+  "Resources": {
+
+    "AuroraAutoScalingPlan": {
+      "Type": "AWS::AutoScalingPlans::ScalingPlan",
+      "Properties": {
+        "ApplicationSource": {
+          "CloudFormationStackARN": { "Ref": "AuroraStack" }
+        },
+        "ScalingInstructions": [{
+          "MaxCapacity": "10",
+          "MinCapacity": "1",
+          "ResourceId": "cluster:AuroraDBCluster",
+          "ScalableDimension": "rds:cluster:ReadReplicaCount",
+          "ServiceNamespace": "rds",
+          "TargetTrackingConfigurations": [{
+            "PredefinedScalingMetricSpecification": {
+              "PredefinedScalingMetricType": "RDSReaderAverageCPUUtilization"
+            },
+            "ScaleInCooldown": "300",
+            "ScaleOutCooldown": "300",
+            "TargetValue": "80"
+            }]
+          }]
+      }
+    }
+  }
+
+}

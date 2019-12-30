@@ -427,13 +427,16 @@
               "02_setup_postgres":{
                 "command": {"Fn::Join": ["", ["service postgresql96 initdb"]]}
               },
-              "03_start_postgres":{
+              "03_trust_localhost":{
+                "command": {"Fn::Join": ["", ["sed -i '82 s/ident/trust/' /var/lib/pgsql96/data/pg_hba.conf"]]}
+              },
+              "04_start_postgres":{
                 "command": {"Fn::Join": ["", ["service postgresql96 start"]]}
               },
-              "04_create_role":{
+              "05_create_role":{
                 "command": {"Fn::Join": ["", ["sudo -u postgres createuser ec2-user"]]}
               },
-              "05_create_database":{
+              "06_create_database":{
                 "command": {"Fn::Join": ["", ["sudo -u postgres createdb ",{"Ref": "DatabaseName"}]]}
               }
             },

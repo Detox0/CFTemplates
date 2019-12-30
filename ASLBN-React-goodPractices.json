@@ -42,6 +42,11 @@
      "Type" : "AWS::EC2::VPC::Id",
      "Description" : "VpcId of your existing Virtual Private Cloud (VPC)",
      "ConstraintDescription" : "must be the VPC Id of an existing Virtual Private Cloud."
+   },
+   "WebSiteName": {
+      "Type": "String",
+      "Description": "Name of the website",
+      "ConstraintDescription" : "Remember to point from Domain Name to the generated DNS"
    }
   },
 
@@ -344,14 +349,14 @@
               }
             },
             "commands" : {
+              "00_add_Node_Repo": {
+                "command": {"Fn::Join": ["", ["curl -sL https://rpm.nodesource.com/setup_10.x | sudo bash -"]]}
+              },
               "01_install_Node": {
-                "command" : {"Fn::Join": ["", ["curl --silent --location https://rpm.nodesource.com/setup_8.x | sudo bash -"]]}
+                "command" : {"Fn::Join": ["", ["yum install -y nodejs"]]}
               },
-              "02_make_yarn_available": {
-                "command" : {"Fn::Join": ["", ["curl --silent --location https://dl.yarnpkg.com/rpm/yarn.repo | sudo tee /etc/yum.repos.d/yarn.repo"]]}
-              },
-              "03_install_Yarn": {
-                "command" : {"Fn::Join": ["", ["yum install yarn -y"]]}
+              "02_install_yarn": {
+                "command" : {"Fn::Join": ["", ["npm install yarn -g"]]}
               },
               "04_create_state_directory" : {
                 "command" : "mkdir -p /var/awslogs/state"
@@ -432,7 +437,7 @@
                   "server {\n",
                   " listen 80;\n",
                   " root /var/www/src/build;\n",
-                  " server_name ", { "Fn::GetAtt" : [ "ApplicationLoadBalancer", "DNSName" ] }, ";\n",
+                  " server_name ", {"Ref": "WebSiteName"}, ";\n",
                   " index index.html;\n",
                   " location / {\n",
                   "  try_files $uri /index.html =404;\n",
@@ -451,10 +456,7 @@
               "02_Run_React":{
                 "command": {"Fn::Join": ["", ["cd /var/www/src && yarn build"]]},
               },
-              "03_setupNginxConf":{
-                "command": {"Fn::Join": ["", ["sed -i 's/http {/http {server_names_hash_bucket_size  128;/1' /etc/nginx/nginx.conf"]]}
-              },
-              "04_RestartNginx":{
+              "03_RestartNginx":{
                 "command": {"Fn::Join": ["", ["service nginx restart"]]},
               }
             }
@@ -597,6 +599,12 @@
             "FromPort" : 22,
             "ToPort" : 22,
             "CidrIp" : "0.0.0.0/0"
+          },
+          {
+            "IpProtocol" : "tcp",
+            "FromPort" : 443,
+            "ToPort" : 443,
+            "CidrIp" : "0.0.0.0/0"
           }],
         "VpcId": { "Ref": "VpcId" }
       }
@@ -611,7 +619,14 @@
             "FromPort" : 80,
             "ToPort" : 80,
             "CidrIp" : "0.0.0.0/0"
-          }],
+          },
+          {
+              "IpProtocol" : "tcp",
+              "FromPort" : 443,
+              "ToPort" : 443,
+              "CidrIp" : "0.0.0.0/0"
+            }
+        ],
         "VpcId": { "Ref": "VpcId" }
       }
     }

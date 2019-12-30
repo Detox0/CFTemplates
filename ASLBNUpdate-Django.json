@@ -4,12 +4,12 @@
   "Description" : "AWS CloudFormation Sample Template EC2InstanceWithSecurityGroupSample: Create an Amazon EC2 instance running the Amazon Linux AMI. The AMI is chosen based on the region in which the stack is run. This example creates an EC2 security group for the instance to give you SSH access. **WARNING** This template creates an Amazon EC2 instance. You will be billed for the AWS resources used if you create a stack from this template.",
 
   "Parameters" : {
-
     "KeyName": {
       "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instance",
       "Type": "AWS::EC2::KeyPair::KeyName",
       "ConstraintDescription" : "must be the name of an existing EC2 KeyPair."
     },
+
     "InstanceType" : {
       "Description" : "WebServer EC2 instance type",
       "Type" : "String",
@@ -39,25 +39,36 @@
      "Type": "String",
      "ConstraintDescription": "The creation will fail if the name is incorrect"
    },
+   "AuroraDBStackDNS":{
+     "Description": "DNS of the Stack where AuroraDB lives.",
+     "Type": "String",
+     "ConstraintDescription": "Must be a valid DNS name."
+   },
+   "DBAdminUser":{
+     "NoEcho": "true",
+     "Description": "Database admin username.",
+     "Type": "String",
+     "ConstraintDescription": "Must be a valid username"
+   },
+   "DBAdminPassword":{
+     "NoEcho": "true",
+     "Description": "Database admin password.",
+     "Type": "String",
+     "ConstraintDescription": "Must be a valid password."
+   },
    "Subnets": {
      "Description": "Id of a subnet that will shelter the EC2 Instance",
      "Type": "List<AWS::EC2::Subnet::Id>",
-     "ConstraintDescription": "Must be in the same VPC that the AuroraDB instance (IF you have an Aurora Instance)."
+     "ConstraintDescription": "Must be in the same VPC that the AuroraDB instance."
+   },
+   "DBName": {
+     "Description": "Name of the database created in the AuroraStack.",
+     "Type": "String",
    },
    "VpcId": {
      "Type" : "AWS::EC2::VPC::Id",
      "Description" : "VpcId of your existing Virtual Private Cloud (VPC)",
      "ConstraintDescription" : "must be the VPC Id of an existing Virtual Private Cloud."
-   },
-   "ZabbixMetaData": {
-     "Type": "String",
-     "Description" : "Server identifier so that Zabbix can monitor the AutoScaling instances.",
-     "ConstraintDescription" : "Must create an autoregistration action in Zabbix with the instruction 'Host metadata contains (this string)'."
-   },
-   "DomainName":{
-     "Type": "String",
-     "Description" : "Domain Name where the application will live.",
-     "ConstraintDescription" : "Must be a valid Domain Name"
    }
   },
 
@@ -305,6 +316,7 @@
                                   "autoscaling:EC2_INSTANCE_TERMINATE_ERROR"]
         }
       },
+
       "UpdatePolicy": {
         "AutoScalingRollingUpdate": {
           "MinInstancesInService": "1",
@@ -321,7 +333,7 @@
         "Comment": "Data that will be added to the EC2 creation",
         "AWS::CloudFormation::Init": {
           "configSets": {
-            "InstallAndRun": ["Install_cfn", "Install_packages", "SetUp_env", "Zabbix_Installation", "Deploy_app"]
+            "InstallAndRun": ["Install_cfn", "UpdateApp", "Deploy_app"]
           },
           "Install_cfn": {
             "files": {
@@ -354,167 +366,23 @@
                               "files" : ["/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf"]}
             }
           },
-          "Install_packages":{
-            "packages": {
-              "yum": {
-                "python36": [],
-                "python36-devel": [],
-                "python36-tools": [],
-                "git": [],
-                "nginx": [],
-                "gcc": [],
-                "postgresql96": [],
-                "postgresql96-server": [],
-                "awslogs": []
+          "UpdateApp":{
+            "commands" : {
+              "01_update_app_version" : {
+                "command" : {"Fn::Join": ["", ["cd /var/www/src && git pull"]]}
               }
-            },
-            "files":{
-              "/etc/awslogs/awslogs.conf": {
-                "content": { "Fn::Join": [ "", [
-                  "[general]\n",
-                  "state_file= /var/awslogs/state/agent-state\n",
-
-                  "[/var/log/cloud-init.log]\n",
-                  "file = /var/log/cloud-init.log\n",
-                  "log_group_name = ", { "Ref": "CloudFormationLogs" }, "\n",
-                  "log_stream_name = {instance_id}/cloud-init.log\n",
-                  "datetime_format = \n",
-
-                  "[/var/log/cloud-init-output.log]\n",
-                  "file = /var/log/cloud-init-output.log\n",
-                  "log_group_name = ", { "Ref": "CloudFormationLogs" }, "\n",
-                  "log_stream_name = {instance_id}/cloud-init-output.log\n",
-                  "datetime_format = \n",
-
-                  "[/var/log/cfn-init.log]\n",
-                  "file = /var/log/cfn-init.log\n",
-                  "log_group_name = ", { "Ref": "CloudFormationLogs" }, "\n",
-                  "log_stream_name = {instance_id}/cfn-init.log\n",
-                  "datetime_format = \n",
-
-                  "[/var/log/cfn-hup.log]\n",
-                  "file = /var/log/cfn-hup.log\n",
-                  "log_group_name = ", { "Ref": "CloudFormationLogs" }, "\n",
-                  "log_stream_name = {instance_id}/cfn-hup.log\n",
-                  "datetime_format = \n",
-
-                  "[/var/log/cfn-wire.log]\n",
-                  "file = /var/log/cfn-wire.log\n",
-                  "log_group_name = ", { "Ref": "CloudFormationLogs" }, "\n",
-                  "log_stream_name = {instance_id}/cfn-wire.log\n",
-                  "datetime_format = \n",
-
-                  "[/var/log/httpd]\n",
-                  "file = /var/log/httpd/*\n",
-                  "log_group_name = ", { "Ref": "CloudFormationLogs" }, "\n",
-                  "log_stream_name = {instance_id}/httpd\n",
-                  "datetime_format = %d/%b/%Y:%H:%M:%S\n"
-                ] ] },
-                "mode": "000444",
-                "owner": "root",
-                "group": "root"
-              },
-              "/etc/awslogs/awscli.conf": {
-                "content": { "Fn::Join": [ "", [
-                  "[plugins]\n",
-                  "cwlogs = cwlogs\n",
-                  "[default]\n",
-                  "region = ", { "Ref" : "AWS::Region" }, "\n"
-                ] ] },
-                "mode": "000444",
-                "owner": "root",
-                "group": "root"
-              }
-            },
-            "services" : {
-              "sysvinit" : {
-                "awslogs"    : { "enabled" : "true", "ensureRunning" : "true",
-                                 "files" : [ "/etc/awslogs/awslogs.conf" ] }
-              }
-            }
-          },
-          "SetUp_env":{
-            "files":{
-              "/tmp/mysite_nginx.conf": {
-                "content": { "Fn::Join": [ "", [
-                  "upstream django {\n",
-                  " server 127.0.0.1:8000;\n",
-                  "}\n\n",
-                  "server {\n",
-                  " listen 80;\n",
-                  " server_name ", { "Ref": "DomainName" } ,";\n",
-                  " charset  utf-8;\n",
-                  " client_max_body_size 75M;\n",
-                  " location /static  {\n",
-                  "  alias /var/www/src/staticfiles ;\n",
-                  " }\n",
-                  " location /{\n",
-                  "  proxy_pass_header Server;\n",
-                  "  proxy_set_header Host $http_host;\n",
-                  "  proxy_redirect off;\n",
-                  "  proxy_set_header X-Real-IP  $remote_addr;\n",
-                  "  proxy_set_header X-Scheme $scheme;",
-                  "  proxy_pass http://django/;\n",
-                  " }\n",
-                  "}"
-                  ]]},
-                  "mode": "000755",
-                  "owner": "root",
-                  "group": "root"
-              }
-
-            },
-            "commands":{
-              "01_cloneProject":{
-                "command": {"Fn::Join": ["", ["git clone https://", {"Ref": "CVUserName"},":",{"Ref": "CVPassWord"},{"Ref": "RepositoryExtension"}, " /var/www/src"]]}
-              },
-              "02_moveFolder":{
-                "command": {"Fn::Join": ["", ["cp /tmp/mysite_nginx.conf /var/www/src"]]}
-              },
-              "03_startNginx":{
-                "command": {"Fn::Join": ["", ["/etc/init.d/nginx start"]]}
-              },
-              "04_symLink":{
-                "command": {"Fn::Join": ["", ["ln -s /var/www/src/mysite_nginx.conf /etc/nginx/conf.d/"]]}
-              },
-              "05_installPipenv":{
-                "command": {"Fn::Join": ["", ["curl https://raw.githubusercontent.com/kennethreitz/pipenv/master/get-pipenv.py | python"]]}
-              }
-            }
-          },
-          "Zabbix_Installation":{
-            "commands":{
-              "01_installZabbixAgent": {
-                "command": {"Fn::Join": ["", ["rpm -Uvh https://repo.zabbix.com/zabbix/4.4/rhel/6/x86_64/zabbix-agent-4.4.0-1.el6.x86_64.rpm"]]},
-              },
-              "02_addServerActive": {
-                "command": {"Fn::Join": ["", ["sed -i '139 s/ServerActive=127.0.0.1/ServerActive=zabbix.labs-tdc.com:10051/' /etc/zabbix/zabbix_agentd.conf "]]},
-              },
-              "03_removeHostName": {
-                "command": {"Fn::Join": ["", ["sed -i '150 s/Hostname=Zabbix server/#Hostname=/' /etc/zabbix/zabbix_agentd.conf "]]},
-              },
-              "04_addMetaData": {
-                "command": {"Fn::Join": ["", ["sed -i '169 s/# HostMetadata=/HostMetadata= ", {"Ref": "ZabbixMetaData"} ,"/' /etc/zabbix/zabbix_agentd.conf "]]},
-              },
-              "05_addMetaData": {
-                "command": {"Fn::Join": ["", ["service zabbix-agent start"]]},
-              }
-
             }
           },
           "Deploy_app":{
             "commands":{
-              "00_changeOwner":{
-                "command": {"Fn::Join": ["", ["chown -R ec2-user /var/www/src "]]},
-              },
               "01_createPipenv": {
-                "command": {"Fn::Join": ["", ["su - ec2-user -c \"cd /var/www/src && pipenv --three && pipenv install\""]]},
+                "command": {"Fn::Join": ["", ["su - ec2-user -c \"cd /home/ec2-user/src && pipenv --three && pipenv install\""]]},
               },
               "02_migrateDB": {
-                "command": {"Fn::Join": ["", ["su - ec2-user -c \"cd /var/www/src && pipenv run python manage.py migrate\""]]},
+                "command": {"Fn::Join": ["", ["su - ec2-user -c \"cd /home/ec2-user/src && pipenv run python manage.py migrate\""]]},
               },
               "03_UwsgiDeploy":{
-                "command": {"Fn::Join": ["", ["su - ec2-user -c \"cd /var/www/src && pipenv run uwsgi --http :8000 --module ",{"Ref": "MainFolderName"},".wsgi&\""]]},
+                "command": {"Fn::Join": ["", ["su - ec2-user -c \"cd /home/ec2-user/src && pipenv run uwsgi --http :8000 --module ",{"Ref": "MainFolderName"},".wsgi&\""]]},
               },
               "03_RestartNginx":{
                 "command": {"Fn::Join": ["", ["service nginx restart"]]},
@@ -648,7 +516,12 @@
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
         "GroupDescription": "Security group for the auto scaling machines that allows requests to the port 80 and port 22 for SSH",
-        "SecurityGroupIngress": [
+        "SecurityGroupIngress": [{
+            "IpProtocol" : "tcp",
+            "FromPort" : 80,
+            "ToPort" : 80,
+            "CidrIp" : "0.0.0.0/0"
+          },
           {
             "IpProtocol" : "tcp",
             "FromPort" : 22,
@@ -668,14 +541,7 @@
             "FromPort" : 80,
             "ToPort" : 80,
             "CidrIp" : "0.0.0.0/0"
-          },
-          {
-            "IpProtocol" : "tcp",
-            "FromPort" : 443,
-            "ToPort" : 443,
-            "CidrIp" : "0.0.0.0/0"
-          }
-        ],
+          }],
         "VpcId": { "Ref": "VpcId" }
       }
     }
